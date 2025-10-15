@@ -1,0 +1,293 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Solver Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #1a202c, #2d3748);
+            color: #e2e8f0;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #sudoku-board {
+            display: grid;
+            grid-template-columns: repeat(9, 50px);
+            gap: 2px;
+            background: #4a5568;
+            padding: 4px;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+        .cell {
+            width: 50px;
+            height: 50px;
+            background: #fff;
+            border: none;
+            text-align: center;
+            font-size: 18px;
+            color: #1a202c;
+            transition: background 0.3s ease;
+        }
+        .cell:focus {
+            outline: none;
+            background: #e2e8f0;
+        }
+        .cell.filled {
+            background: #60a5fa;
+            color: #fff;
+        }
+        .cell.solving {
+            background: #f87171;
+            color: #fff;
+        }
+        .cell.invalid {
+            background: #ef4444;
+            color: #fff;
+        }
+        #controls {
+            max-width: 1200px;
+            width: 100%;
+            padding: 20px;
+            background: rgba(45, 55, 72, 0.8);
+            border-radius: 12px;
+            margin: 20px 0;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        button {
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .theme-toggle {
+            background: #4a5568;
+            color: #e2e8f0;
+            padding: 8px 16px;
+            border-radius: 8px;
+        }
+        .theme-toggle:hover {
+            background: #718096;
+        }
+        #info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        @media (max-width: 768px) {
+            #sudoku-board {
+                grid-template-columns: repeat(9, 40px);
+            }
+            .cell {
+                width: 40px;
+                height: 40px;
+                font-size: 16px;
+            }
+        }
+        @media (max-width: 480px) {
+            #sudoku-board {
+                grid-template-columns: repeat(9, 30px);
+            }
+            .cell {
+                width: 30px;
+                height: 30px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body class="dark">
+    <div class="w-full max-w-7xl mx-auto p-6">
+        <h1 class="text-4xl font-bold text-center mb-6 text-white">Sudoku Solver Visualizer</h1>
+        <div id="controls" class="flex flex-wrap gap-4 justify-center">
+            <button onclick="solveSudoku()" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Solve</button>
+            <button onclick="resetBoard()" class="bg-red-600 text-white px-4 py-2 rounded-lg">Reset</button>
+            <button onclick="loadSample()" class="bg-green-600 text-white px-4 py-2 rounded-lg">Load Sample</button>
+            <button onclick="toggleTheme()" class="theme-toggle">Toggle Theme</button>
+        </div>
+        <div id="info" class="text-sm">Enter a Sudoku puzzle or load a sample to start.</div>
+        <div id="sudoku-board" class="mt-6"></div>
+    </div>
+    <script>
+        let board = Array(9).fill().map(() => Array(9).fill(0));
+        let solving = false;
+
+        function initBoard() {
+            const boardDiv = document.getElementById('sudoku-board');
+            boardDiv.innerHTML = '';
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'cell';
+                    input.maxLength = 1;
+                    input.oninput = () => {
+                        const value = parseInt(input.value);
+                        if (isNaN(value) || value < 1 || value > 9) {
+                            input.value = '';
+                            board[i][j] = 0;
+                        } else {
+                            board[i][j] = value;
+                            input.classList.add('filled');
+                        }
+                    };
+                    boardDiv.appendChild(input);
+                }
+            }
+        }
+
+        function updateBoard() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach((cell, index) => {
+                const i = Math.floor(index / 9);
+                const j = index % 9;
+                cell.value = board[i][j] === 0 ? '' : board[i][j];
+                cell.classList.remove('filled', 'solving', 'invalid');
+                if (board[i][j] !== 0) cell.classList.add('filled');
+            });
+        }
+
+        function isValid(board, row, col, num) {
+            for (let x = 0; x < 9; x++) {
+                if (board[row][x] === num || board[x][col] === num) return false;
+            }
+            const startRow = row - row % 3, startCol = col - col % 3;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    if (board[i + startRow][j + startCol] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        async function solveSudoku() {
+            if (solving) return;
+            solving = true;
+            updateInfo('Solving...');
+            const cells = document.querySelectorAll('.cell');
+            if (await solve(0, 0)) {
+                updateInfo('Puzzle solved!');
+            } else {
+                updateInfo('No solution exists.');
+                cells.forEach(cell => cell.classList.add('invalid'));
+            }
+            solving = false;
+        }
+
+        async function solve(row, col) {
+            if (row === 9) return true;
+            const nextRow = col === 8 ? row + 1 : row;
+            const nextCol = col === 8 ? 0 : col + 1;
+            if (board[row][col] !== 0) return await solve(nextRow, nextCol);
+            for (let num = 1; num <= 9; num++) {
+                if (isValid(board, row, col, num)) {
+                    board[row][col] = num;
+                    const index = row * 9 + col;
+                    const cell = document.querySelectorAll('.cell')[index];
+                    cell.value = num;
+                    cell.classList.add('solving');
+                    await sleep(50);
+                    if (await solve(nextRow, nextCol)) return true;
+                    board[row][col] = 0;
+                    cell.value = '';
+                    cell.classList.remove('solving');
+                    await sleep(50);
+                }
+            }
+            return false;
+        }
+
+        function resetBoard() {
+            board = Array(9).fill().map(() => Array(9).fill(0));
+            updateBoard();
+            updateInfo('Board reset.');
+            solving = false;
+        }
+
+        function loadSample() {
+            const sample = [
+                [5,3,0,0,7,0,0,0,0],
+                [6,0,0,1,9,5,0,0,0],
+                [0,9,8,0,0,0,0,6,0],
+                [8,0,0,0,6,0,0,0,3],
+                [4,0,0,8,0,3,0,0,1],
+                [7,0,0,0,2,0,0,0,6],
+                [0,6,0,0,0,0,2,8,0],
+                [0,0,0,4,1,9,0,0,5],
+                [0,0,0,0,8,0,0,7,9]
+            ];
+            board = sample.map(row => row.slice());
+            updateBoard();
+            updateInfo('Sample puzzle loaded.');
+        }
+
+        function updateInfo(message) {
+            document.getElementById('info').innerHTML = message;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            document.body.style.background = document.body.classList.contains('dark')
+                ? 'linear-gradient(135deg, #1a202c, #2d3748)'
+                : 'linear-gradient(135deg, #e6e6fa, #dcdcdc)';
+            updateInfo('Theme toggled.');
+        }
+
+        // Initialize board
+        initBoard();
+        updateBoard();
+    </script>
+</body>
+</html>
