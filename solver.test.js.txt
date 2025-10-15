@@ -1,0 +1,8 @@
+// solver.test.js
+const { isValid, solve } = require('./solver');
+test('Validates Sudoku cell correctly', () => {
+  const board = Array(9).fill().map(() => Array(9).fill(0));
+  expect(isValid(board, 0, 0, 5)).toBe(true);
+  board[0][1] = 5;
+  expect(isValid(board, 0, 2, 5)).toBe(false);
+});
